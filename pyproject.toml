@@ -1,0 +1,37 @@
+[tool.poetry]
+name = "delayed-streams-modeling"
+version = "0.1.0"
+description = "Kyutai STT & TTS - Streaming Sequence-to-Sequence Learning with Delayed Streams Modeling"
+authors = ["Kyutai Labs"]
+readme = "README.md"
+license = "MIT"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+# Common dependencies
+sentencepiece = "^0.2.0"
+sounddevice = "^0.5.0"
+huggingface-hub = "^0.26.0"
+numpy = "^2.1.0"
+requests = "^2.32.0"
+# MLX dependencies (optional, only works on Apple Silicon)
+moshi-mlx = {version = "^0.2.12", optional = true}
+mlx = {version = "^0.26.0", optional = true}
+# Dataset evaluation dependencies
+datasets = {version = "^3.0.0", optional = true}
+jiwer = {version = "^3.1.0", optional = true}
+openai-whisper = {version = "^20240930", optional = true}
+tqdm = {version = "^4.66.0", optional = true}
+
+[tool.poetry.extras]
+mlx = ["moshi-mlx", "mlx"]
+eval = ["datasets", "jiwer", "openai-whisper", "tqdm"]
+all = ["moshi-mlx", "mlx", "datasets", "jiwer", "openai-whisper", "tqdm"]
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
