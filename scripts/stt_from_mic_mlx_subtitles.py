@@ -99,13 +99,13 @@ class SubtitleBatcher:
         min_duration: float = 1.5,
         max_duration: float = 5.0,
         max_lines: int = 2,
-        chars_per_line: int = 42,
+        words_per_line: int = 7,
     ):
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.max_lines = max_lines
-        self.chars_per_line = chars_per_line
-        self.max_chars = max_lines * chars_per_line
+        self.words_per_line = words_per_line
+        self.max_words = max_lines * words_per_line
 
         self.current_words: List[str] = []
         self.segment_start_time: float = 0.0
@@ -113,10 +113,10 @@ class SubtitleBatcher:
         self.completed_segments: List[SubtitleSegment] = []
 
     @staticmethod
-    def break_into_lines(text: str, max_lines: int, chars_per_line: int) -> List[str]:
+    def break_into_lines(text: str, max_lines: int, words_per_line: int) -> List[str]:
         """
-        Break text into multiple lines at word boundaries.
-        Tries to balance line lengths and break at natural points.
+        Break text into multiple lines based on word count.
+        Distributes words evenly across lines.
         """
         if not text:
             return []
@@ -126,45 +126,32 @@ class SubtitleBatcher:
             return []
 
         # If text fits on one line, return it
-        if len(text) <= chars_per_line:
+        if len(words) <= words_per_line:
             return [text]
 
         lines = []
-        current_line = ""
+        current_line_words = []
 
-        for word in words:
-            # Check if adding this word would exceed line length
-            test_line = (current_line + " " + word).strip() if current_line else word
+        for i, word in enumerate(words):
+            current_line_words.append(word)
 
-            if len(test_line) <= chars_per_line:
-                current_line = test_line
-            else:
-                # Current line is full, start a new one
-                if current_line:
-                    lines.append(current_line)
-                    current_line = word
-                else:
-                    # Word itself is longer than chars_per_line, break it
-                    lines.append(word[:chars_per_line])
-                    current_line = word[chars_per_line:]
+            # Check if current line is full
+            if len(current_line_words) >= words_per_line:
+                # Line is full, add it
+                lines.append(" ".join(current_line_words))
+                current_line_words = []
 
                 # Stop if we've reached max lines
-                if len(lines) >= max_lines - 1:
-                    # Add remaining words to last line
-                    remaining_words = words[words.index(word) + (1 if current_line == word else 0):]
+                if len(lines) >= max_lines:
+                    # Add any remaining words to last line (overflow)
+                    remaining_words = words[i + 1:]
                     if remaining_words:
-                        last_line = " ".join([current_line] + remaining_words) if current_line else " ".join(remaining_words)
-                        # Truncate if necessary
-                        if len(last_line) > chars_per_line:
-                            last_line = last_line[:chars_per_line - 3] + "..."
-                        lines.append(last_line)
-                    elif current_line:
-                        lines.append(current_line)
+                        lines[-1] = lines[-1] + " " + " ".join(remaining_words)
                     return lines
 
-        # Add any remaining text
-        if current_line:
-            lines.append(current_line)
+        # Add any remaining words as the last line
+        if current_line_words:
+            lines.append(" ".join(current_line_words))
 
         return lines
 
@@ -194,7 +181,7 @@ class SubtitleBatcher:
 
         Rules:
         1. Must meet minimum duration since last flush (prevent flashing)
-        2. Then check: VAD pause OR max duration OR max chars exceeded
+        2. Then check: VAD pause OR max duration OR max words exceeded
         """
         if not self.current_words:
             return False
@@ -203,7 +190,7 @@ class SubtitleBatcher:
         if self.time_since_last_flush(current_time) < self.min_duration:
             return False
 
-        current_text = self.get_current_text()
+        word_count = len(self.current_words)
         duration = self.get_duration(current_time)
 
         # Check flush conditions
@@ -211,7 +198,7 @@ class SubtitleBatcher:
             return True
         if duration >= self.max_duration:
             return True
-        if len(current_text) >= self.max_chars:
+        if word_count >= self.max_words:
             return True
 
         return False
@@ -275,10 +262,10 @@ if __name__ == "__main__":
         help="Maximum number of lines per subtitle (default: 2)",
     )
     parser.add_argument(
-        "--chars-per-line",
+        "--words-per-line",
         type=int,
-        default=42,
-        help="Maximum characters per line (default: 42)",
+        default=7,
+        help="Maximum words per line (default: 7, ~2.3s to read at 180 WPM)",
     )
     parser.add_argument(
         "--ollama-host",
@@ -372,7 +359,7 @@ if __name__ == "__main__":
         min_duration=args.min_duration,
         max_duration=args.max_duration,
         max_lines=args.max_lines,
-        chars_per_line=args.chars_per_line,
+        words_per_line=args.words_per_line,
     )
 
     block_queue = queue.Queue()
@@ -384,8 +371,8 @@ if __name__ == "__main__":
     print(f"  Min duration: {args.min_duration}s")
     print(f"  Max duration: {args.max_duration}s")
     print(f"  Max lines: {args.max_lines}")
-    print(f"  Chars per line: {args.chars_per_line}")
-    print(f"  Max characters: {batcher.max_chars}")
+    print(f"  Words per line: {args.words_per_line}")
+    print(f"  Max words: {batcher.max_words}")
     print("\nTranslation settings:")
     print(f"  Ollama host: {args.ollama_host}")
     print(f"  Model: {args.ollama_model}")
@@ -461,7 +448,7 @@ if __name__ == "__main__":
 
                         # Break translated text into lines
                         segment.lines = SubtitleBatcher.break_into_lines(
-                            translated, args.max_lines, args.chars_per_line
+                            translated, args.max_lines, args.words_per_line
                         )
 
                         # Display the formatted subtitle (multi-line)
@@ -494,7 +481,7 @@ if __name__ == "__main__":
 
                     # Break translated text into lines
                     segment.lines = SubtitleBatcher.break_into_lines(
-                        translated, args.max_lines, args.chars_per_line
+                        translated, args.max_lines, args.words_per_line
                     )
 
                     # Display the formatted subtitle
