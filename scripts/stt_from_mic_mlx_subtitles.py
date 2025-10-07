@@ -163,7 +163,7 @@ class SubtitleBatcher:
 
     def get_current_text(self) -> str:
         """Get the current accumulated text."""
-        return "".join(self.current_words).strip()
+        return " ".join(self.current_words).strip()
 
     def get_duration(self, current_time: float) -> float:
         """Get duration of current segment."""
@@ -399,6 +399,7 @@ if __name__ == "__main__":
     print("=" * 80)
 
     start_time = time.time()
+    word_buffer = ""  # Accumulate token pieces into complete words
 
     with sd.InputStream(
         channels=1,
@@ -422,12 +423,26 @@ if __name__ == "__main__":
                 text_token = text_token[0].item()
 
                 if text_token not in (0, 3):
-                    _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
-                    _text = _text.replace("▁", " ")
-                    batcher.add_word(_text, current_time)
+                    token_piece = text_tokenizer.id_to_piece(text_token)  # type: ignore
+
+                    # Check if this token starts a new word (▁ is SentencePiece word boundary marker)
+                    if token_piece.startswith("▁"):
+                        # Flush previous word if exists
+                        if word_buffer.strip():
+                            batcher.add_word(word_buffer.strip(), current_time)
+                        # Start new word (remove ▁ marker)
+                        word_buffer = token_piece[1:]  # Remove ▁ character
+                    else:
+                        # Continue building current word
+                        word_buffer += token_piece
 
                 # Check if we should flush the batch (no VAD, just time/char limits)
                 if batcher.should_flush(current_time, vad_pause=False):
+                    # Flush any remaining word in buffer before flushing segment
+                    if word_buffer.strip():
+                        batcher.add_word(word_buffer.strip(), current_time)
+                        word_buffer = ""
+
                     segment = batcher.flush(current_time)
                     if segment:
                         # Print original transcription immediately
@@ -459,7 +474,12 @@ if __name__ == "__main__":
 
         except KeyboardInterrupt:
             print("\n\nStopping...")
-            # Flush any remaining words
+            # Flush any remaining word in buffer
+            if word_buffer.strip():
+                batcher.add_word(word_buffer.strip(), time.time() - start_time)
+                word_buffer = ""
+
+            # Flush any remaining words in segment
             if batcher.current_words:
                 segment = batcher.flush(time.time() - start_time)
                 if segment:
