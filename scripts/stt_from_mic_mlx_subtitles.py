@@ -100,12 +100,14 @@ class SubtitleBatcher:
         max_duration: float = 5.0,
         max_lines: int = 2,
         words_per_line: int = 7,
+        soft_max_words: int = 10,
     ):
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.max_lines = max_lines
         self.words_per_line = words_per_line
-        self.max_words = max_lines * words_per_line
+        self.soft_max_words = soft_max_words
+        self.max_words = max_lines * words_per_line  # Hard limit
 
         self.current_words: List[str] = []
         self.segment_start_time: float = 0.0
@@ -175,13 +177,21 @@ class SubtitleBatcher:
         """Get time since last segment was displayed."""
         return current_time - self.last_flush_time
 
+    def is_sentence_boundary(self) -> bool:
+        """Check if the last word ends with sentence-ending punctuation."""
+        if not self.current_words:
+            return False
+        last_word = self.current_words[-1].rstrip()
+        return last_word.endswith(('.', '!', '?'))
+
     def should_flush(self, current_time: float, vad_pause: bool = False) -> bool:
         """
         Determine if we should flush the current batch.
 
         Rules:
         1. Must meet minimum duration since last flush (prevent flashing)
-        2. Then check: VAD pause OR max duration OR max words exceeded
+        2. Hard limits: max duration OR max words → force flush
+        3. Soft limit: soft_max_words + sentence boundary → prefer flush
         """
         if not self.current_words:
             return False
@@ -193,13 +203,18 @@ class SubtitleBatcher:
         word_count = len(self.current_words)
         duration = self.get_duration(current_time)
 
-        # Check flush conditions
+        # Hard limits (must flush regardless)
         if vad_pause:
             return True
         if duration >= self.max_duration:
             return True
         if word_count >= self.max_words:
             return True
+
+        # Soft limit with sentence boundary detection
+        if word_count >= self.soft_max_words:
+            if self.is_sentence_boundary():
+                return True  # Good break point - complete sentence!
 
         return False
 
@@ -266,6 +281,12 @@ if __name__ == "__main__":
         type=int,
         default=7,
         help="Maximum words per line (default: 7, ~2.3s to read at 180 WPM)",
+    )
+    parser.add_argument(
+        "--soft-max-words",
+        type=int,
+        default=10,
+        help="Soft word limit - prefer to flush at sentence boundary after this (default: 10)",
     )
     parser.add_argument(
         "--ollama-host",
@@ -360,6 +381,7 @@ if __name__ == "__main__":
         max_duration=args.max_duration,
         max_lines=args.max_lines,
         words_per_line=args.words_per_line,
+        soft_max_words=args.soft_max_words,
     )
 
     block_queue = queue.Queue()
@@ -372,7 +394,8 @@ if __name__ == "__main__":
     print(f"  Max duration: {args.max_duration}s")
     print(f"  Max lines: {args.max_lines}")
     print(f"  Words per line: {args.words_per_line}")
-    print(f"  Max words: {batcher.max_words}")
+    print(f"  Soft max words: {batcher.soft_max_words} (prefer sentence boundary)")
+    print(f"  Hard max words: {batcher.max_words} (force flush)")
     print("\nTranslation settings:")
     print(f"  Ollama host: {args.ollama_host}")
     print(f"  Model: {args.ollama_model}")
